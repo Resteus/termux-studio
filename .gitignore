@@ -1,8 +1,20 @@
-__pycache__/
-*.py[cod]
-.venv/
+# Runtime & local session state
+sessions.json
 *.log
 *.pid
 *.bak
-*.tmp
-sessions.json
+
+# Python & environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Models & local builds
+models/
+*.gguf
+builds/
+keystores/
+*.jks
+*.keystore
+*.apk

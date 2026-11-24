@@ -51,6 +51,7 @@ function renderServerCards(servers) {
       startBtn.onclick = async () => {
         switchTab("chat");
         await sendCommand(srv.start_cmd);
+        setTimeout(loadWorkspaceTools, 2500);
       };
       acts.appendChild(startBtn);
     } else if (srv.running && srv.stop_cmd) {
@@ -60,6 +61,7 @@ function renderServerCards(servers) {
       stopBtn.onclick = async () => {
         switchTab("chat");
         await sendCommand(srv.stop_cmd);
+        setTimeout(loadWorkspaceTools, 1500);
       };
       acts.appendChild(stopBtn);
     }

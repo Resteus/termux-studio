@@ -346,74 +346,69 @@ def api_status():
 
 def _scan_active_ports(pinned_ports: set) -> list:
     import concurrent.futures
-    import subprocess
 
     proc_by_port = {}
-    extra_ports = set()
+    generic_procs = []
     try:
         out = subprocess.check_output(["ps", "-A", "-o", "pid,args"], text=True, stderr=subprocess.DEVNULL)
         for line in out.splitlines()[1:]:
-            parts = line.split(None, 7)
-            if len(parts) < 8:
+            parts = line.split(None, 1)
+            if len(parts) < 2 or not parts[0].isdigit():
                 continue
-            pid_str, cmd = parts[1], parts[7]
-            if not pid_str.isdigit():
+            pid, cmd = int(parts[0]), parts[1].strip()
+            if pid == os.getpid() or "ps -A" in cmd:
                 continue
-            pid = int(pid_str)
-            if pid == os.getpid():
+
+            ports = [int(x) for x in re.findall(r"(?::|--port[=\s]+|-p[=\s]+)(\d{4,5})\b", cmd)]
+            matched_port = next((p for p in ports if 1024 <= p <= 65535 and p not in pinned_ports), None)
+
+            lower = cmd.lower()
+            if "postgres" in lower and ("-d " in lower or "postgresql" in lower):
+                proc_by_port[5432] = {"pid": pid, "name": "PostgreSQL"}
                 continue
-            for m in re.finditer(r"(?:127\.0\.0\.1:|0\.0\.0\.0:|localhost:|--port[=\s]+|-p[=\s]+|:)(\d{4,5})\b", cmd):
-                p = int(m.group(1))
-                if 1024 <= p <= 65535 and p not in pinned_ports:
-                    extra_ports.add(p)
-                    label = cmd
-                    if "speakers-studio" in cmd or "speakers_studio" in cmd:
-                        label = "Speakers Studio"
-                    elif "http.server" in cmd:
-                        label = "Python HTTP Server"
-                    elif "uvicorn" in cmd:
-                        label = "Uvicorn Server"
-                    elif "node" in cmd or "vite" in cmd or "next" in cmd:
-                        label = "Node Web Server"
-                    elif "php" in cmd:
-                        label = "PHP Built-in Server"
-                    else:
-                        toks = [os.path.basename(t) for t in cmd.split() if not t.startswith("-")]
-                        label = " ".join(toks[:2]) or f"Port {p}"
-                    proc_by_port[p] = {"pid": pid, "name": label}
+
+            if "http.server" in lower:
+                label = "Python HTTP Server"
+            elif "uvicorn" in lower:
+                label = "Uvicorn Server"
+            elif "vite" in lower or "next" in lower or "node" in lower:
+                label = "Node Web Server"
+            elif "python" in lower:
+                py_files = [t for t in cmd.split() if t.endswith(".py")]
+                if py_files:
+                    sp = Path(py_files[0])
+                    stem = sp.parent.name if sp.name in ("server.py", "app.py", "main.py", "manage.py") else sp.stem
+                    label = stem.replace("-", " ").replace("_", " ").title()
+                else:
+                    label = "Python Service"
+            else:
+                toks = [os.path.basename(t) for t in cmd.split() if not t.startswith("-")]
+                label = " ".join(toks[:2]) if toks else "Local Service"
+
+            if matched_port:
+                proc_by_port[matched_port] = {"pid": pid, "name": label}
+            elif any(k in lower for k in ("python", "node", "php", "ruby", "uvicorn", "gunicorn")):
+                generic_procs.append({"pid": pid, "name": label})
     except Exception:
         pass
 
-    candidate_ports = set(extra_ports)
-    for r in (range(3000, 3011), range(4000, 4011), range(5000, 5011), range(8000, 8101), range(8800, 8901), range(9000, 9011)):
-        candidate_ports.update(r)
-    candidate_ports.update({4173, 5173, 5174, 5432, 5500, 7860})
-    candidate_ports -= pinned_ports
+    def _probe(port: int) -> bool:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.05):
+                return True
+        except OSError:
+            return False
 
-    open_ports = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:
-        futures = {pool.submit(is_port_open, p): p for p in sorted(candidate_ports)}
-        for fut, p in futures.items():
-            try:
-                if fut.result():
-                    open_ports.append(p)
-            except Exception:
-                pass
+    candidates = [p for p in range(1024, 10001) if p not in pinned_ports]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=128) as pool:
+        open_ports = [p for p, ok in zip(candidates, pool.map(_probe, candidates)) if ok]
 
     discovered = []
-    for p in sorted(open_ports):
-        info = proc_by_port.get(p, {})
-        pid = info.get("pid")
-        name = info.get("name") or f"Local Service (:{p})"
-        entry = {
-            "name": name,
-            "port": p,
-            "url": f"http://127.0.0.1:{p}",
-            "running": True,
-            "auto": True,
-        }
-        if pid:
-            entry["stop_cmd"] = f"kill {pid}"
+    for p in open_ports:
+        info = proc_by_port.get(p) or (generic_procs[0] if len(open_ports) == 1 and len(generic_procs) == 1 else {})
+        entry = {"name": info.get("name") or f"Local Service (:{p})", "port": p, "url": f"http://127.0.0.1:{p}", "running": True, "auto": True}
+        if info.get("pid"):
+            entry["stop_cmd"] = f"kill {info['pid']}"
         discovered.append(entry)
     return discovered
 
@@ -436,14 +431,12 @@ def api_workspace():
         except Exception:
             pass
 
+    llm_script = shlex.quote(str(STUDIO_DIR / "llm.sh"))
     servers = [
         {"name": "Termux Studio", "port": 8888, "url": "http://127.0.0.1:8888", "running": True},
-        {"name": "APK Workstation", "port": 8080, "url": "http://127.0.0.1:8080", "running": is_port_open(8080), "start_cmd": "apkstudio start", "stop_cmd": "apkstudio stop"},
-        {"name": "Gutendex Library", "port": 8000, "url": "http://127.0.0.1:8000", "running": is_port_open(8000), "start_cmd": "cd ~/servers/gutendex && nohup ./start.sh >/dev/null 2>&1 &", "stop_cmd": "pkill -f 'manage.py runserver'"},
-        {"name": "Local LLM (llama-server)", "port": 8090, "url": "http://127.0.0.1:8090", "running": is_port_open(8090), "start_cmd": "~/termux-studio/llm.sh start", "stop_cmd": "~/termux-studio/llm.sh stop"},
+        {"name": "Local LLM (llama-server)", "port": 8090, "url": "http://127.0.0.1:8090", "running": is_port_open(8090), "start_cmd": f"{llm_script} start", "stop_cmd": f"{llm_script} stop"},
     ]
-    pinned_ports = {s["port"] for s in servers}
-    servers.extend(_scan_active_ports(pinned_ports))
+    servers.extend(_scan_active_ports({s["port"] for s in servers}))
     return {"routes": routes, "servers": servers}
 
 
