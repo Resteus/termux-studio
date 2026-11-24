@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content" />
+  <title>Termux Studio :8888</title>
+  <link rel="stylesheet" href="/assets/remixicon.css" />
+  <link rel="stylesheet" href="/assets/cm/codemirror.min.css" />
+  <link rel="stylesheet" href="/assets/cm/material-darker.min.css" />
+  <link rel="stylesheet" href="/assets/main.css?v=1794569973" />
+</head>
+<body>
+<div class="shell-wrap" id="appRoot">
+  <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="closeMobileSidebar()"></div>
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-top">
+      <button class="new-session-btn" onclick="createSession()">
+        <i class="ri-folder-add-line"></i> New Session
+      </button>
+      <button class="close-side-btn" onclick="closeMobileSidebar()" aria-label="Close Sidebar">
+        <i class="ri-close-line"></i>
+      </button>
+    </div>
+    <div class="sessions-scroll" id="sessionsList"></div>
+  </aside>
+
+  <!-- MAIN WORKSPACE -->
+  <div class="main-area">
+    <header>
+      <div class="top-row">
+        <div class="top-left">
+          <button class="menu-toggle" onclick="toggleSidebar()" title="Toggle Sessions">
+            <i class="ri-menu-2-line"></i>
+          </button>
+          <div class="brand">
+            <span class="dot" id="statusDot"></span>
+            <span>Studio</span>
+            <span class="context-label" id="activeContextLabel"></span>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <div class="disk-pill">
+            <i class="ri-hard-drive-2-line"></i>
+            <span id="diskPillText">--</span>
+          </div>
+          <button class="mini-btn" onclick="hardReloadStudio()" title="Hard Reload UI" style="padding:5px 8px;"><i class="ri-refresh-line"></i></button>
+        </div>
+      </div>
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="chat"><i class="ri-terminal-box-line"></i> Chat</button>
+        <button class="tab-btn" data-tab="files"><i class="ri-folder-3-line"></i> Files</button>
+        <button class="tab-btn" data-tab="editor"><i class="ri-code-s-slash-line"></i> Editor</button>
+        <button class="tab-btn" data-tab="tools"><i class="ri-tools-line"></i> Tools</button>
+      </div>
+    </header>
+
+    <!-- CHAT VIEW -->
+    <section class="view active" id="view-chat">
+      <div class="chat-feed" id="chatFeed"></div>
+
+      <div class="bottom-dock">
+        <div class="dock-cwd" onclick="switchTab('files')" title="Open folder in Files">
+          <i class="ri-folder-open-line"></i>
+          <span id="dockCwdText">~</span>
+        </div>
+
+        <div class="interactive-banner" id="interactiveBanner">
+          <i class="ri-keyboard-line"></i> Interactive process running — reply below or tap a key:
+        </div>
+
+        <div class="chips-bar" id="chipsBar"></div>
+
+        <div class="composer">
+          <textarea id="cmdInput" rows="1" placeholder="Tap here to run command..." autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
+          <button class="stop-btn" id="stopBtn" onclick="killRunning()">
+            <i class="ri-stop-circle-line"></i> Ctrl+C
+          </button>
+          <button class="send-btn" id="sendBtn" onclick="handleComposerSubmit()">
+            <i class="ri-play-fill"></i> Run
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- FILES VIEW -->
+    <section class="view" id="view-files">
+      <div class="files-toolbar">
+        <button class="mini-btn" onclick="goParentDir()"><i class="ri-arrow-up-line"></i> Up</button>
+        <button class="mini-btn" onclick="syncChatToFolder()"><i class="ri-pushpin-line"></i> cd Here</button>
+        <button class="mini-btn" onclick="createNewItem('file')"><i class="ri-file-add-line"></i> File</button>
+        <button class="mini-btn" onclick="createNewItem('folder')"><i class="ri-folder-add-line"></i> Folder</button>
+        <button class="mini-btn" onclick="triggerFileUpload()"><i class="ri-upload-2-line"></i> Upload</button>
+        <button class="mini-btn" onclick="loadFiles(browseDir)"><i class="ri-refresh-line"></i></button>
+        <input type="file" id="fileUploadInput" multiple style="display:none" onchange="handleFileUploadInput(this)" />
+      </div>
+
+      <div class="file-clip-bar" id="fileClipBar">
+        <span id="fileClipText">Copied item</span>
+        <div class="file-clip-actions">
+          <button class="mini-btn" onclick="pasteClipboardHere()"><i class="ri-clipboard-line"></i> Paste Here</button>
+          <button class="mini-btn" onclick="clearFileClipboard()"><i class="ri-close-line"></i></button>
+        </div>
+      </div>
+
+      <div class="files-path-bar" id="filesPathText">~</div>
+      <div class="files-list" id="filesList"></div>
+    </section>
+
+    <!-- EDITOR VIEW -->
+    <section class="view" id="view-editor">
+      <div class="editor-head">
+        <div class="editor-path" id="editorPath">No file open (tap a file in Files or type: edit file.py)</div>
+        <div class="lint-banner" id="lintBanner"></div>
+        <div class="editor-tools">
+          <button class="save-btn" onclick="saveCurrentFile()"><i class="ri-save-3-line"></i> Save</button>
+          <button class="mini-btn run-code-btn" onclick="runCurrentFile()"><i class="ri-play-circle-line"></i> Run</button>
+          <button class="mini-btn" onclick="checkEditorErrors()"><i class="ri-bug-line"></i> Check</button>
+          <button class="mini-btn" onclick="editorSelectAll()"><i class="ri-checkbox-multiple-blank-line"></i> All</button>
+          <button class="mini-btn" onclick="editorCopyAll(this)"><i class="ri-file-copy-line"></i> Copy</button>
+          <button class="mini-btn" onclick="editorPaste()"><i class="ri-clipboard-line"></i> Paste</button>
+          <button class="mini-btn" onclick="insertTab()"><i class="ri-space"></i> +Tab</button>
+        </div>
+      </div>
+      <textarea class="editor-area" id="editorArea" placeholder="Open a file to start editing..."></textarea>
+    </section>
+
+    <!-- TOOLKIT VIEW -->
+    <section class="view" id="view-tools">
+      <div class="tools-scroll">
+        <!-- Local LLM Chat -->
+        <div class="tool-card">
+          <div class="tool-card-head">
+            <span><i class="ri-robot-2-line" style="color:var(--accent);"></i> Local LLM Chat (:8090)</span>
+            <div style="display:flex;gap:6px;">
+              <button class="mini-btn" onclick="document.getElementById('agentPromptInput').value='';document.getElementById('agentOutputBox').innerHTML=''">Clear</button>
+              <button class="mini-btn" id="agentRunBtn" onclick="runLocalAgent()"><i class="ri-send-plane-fill"></i> Send</button>
+            </div>
+          </div>
+          <textarea id="agentPromptInput" class="tool-textarea" style="min-height:68px;" placeholder="Ask a question or paste text/code for your local GGUF model (start llama-server below when needed)..."></textarea>
+          <div id="agentOutputBox" style="display:flex;flex-direction:column;gap:8px;"></div>
+        </div>
+
+        <!-- Web Search Tool -->
+        <div class="tool-card">
+          <div class="tool-card-head">
+            <span><i class="ri-global-line" style="color:var(--accent);"></i> Web Search</span>
+          </div>
+          <div class="tool-input-row">
+            <input type="text" id="webSearchInput" class="tool-input" placeholder="Search documentation, errors, packages..." />
+            <button class="send-btn" style="height:38px;" onclick="runWebSearch()"><i class="ri-search-line"></i></button>
+          </div>
+          <div id="webSearchResults" style="display:flex;flex-direction:column;gap:8px;"></div>
+        </div>
+
+        <!-- Local Servers Monitor -->
+        <div class="tool-card">
+          <div class="tool-card-head">
+            <span><i class="ri-server-line" style="color:var(--green);"></i> Local Services</span>
+            <button class="mini-btn" onclick="loadWorkspaceTools()"><i class="ri-refresh-line"></i></button>
+          </div>
+          <div id="serversList" style="display:flex;flex-direction:column;gap:6px;"></div>
+        </div>
+
+        <!-- Saved Routes -->
+        <div class="tool-card">
+          <div class="tool-card-head">
+            <span><i class="ri-route-line" style="color:var(--amber);"></i> Saved Routes</span>
+          </div>
+          <div id="routesList" style="display:flex;flex-direction:column;gap:6px;"></div>
+        </div>
+
+        <!-- Offline Dev Utilities -->
+        <div class="tool-card">
+          <div class="tool-card-head">
+            <span><i class="ri-hammer-line" style="color:var(--accent);"></i> Offline Dev Utilities</span>
+            <button class="mini-btn" onclick="copyText(document.getElementById('miniToolOutput').value, this)"><i class="ri-file-copy-line"></i> Copy</button>
+          </div>
+          <textarea id="miniToolInput" class="tool-textarea" placeholder="Paste JSON, text, or Base64 string here..."></textarea>
+          <div class="editor-tools">
+            <button class="mini-btn" onclick="runMiniTransform('json')">Format JSON</button>
+            <button class="mini-btn" onclick="runMiniTransform('b64enc')">Base64 Encode</button>
+            <button class="mini-btn" onclick="runMiniTransform('b64dec')">Base64 Decode</button>
+            <button class="mini-btn" onclick="runMiniTransform('sha256')">SHA-256</button>
+          </div>
+          <textarea id="miniToolOutput" class="tool-textarea" readonly placeholder="Output appears here..."></textarea>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- CRUD ACTION SHEET -->
+<div class="crud-backdrop" id="crudBackdrop" onclick="closeCrudSheet()"></div>
+<div class="crud-sheet" id="crudSheet">
+  <div class="crud-sheet-head">
+    <div class="crud-sheet-title">
+      <i id="crudSheetIcon" class="ri-file-code-line"></i>
+      <span id="crudSheetTitle">item</span>
+    </div>
+    <button class="icon-btn" onclick="closeCrudSheet()"><i class="ri-close-line"></i></button>
+  </div>
+  <div class="crud-grid">
+    <button class="crud-btn" onclick="crudActionOpen()"><i class="ri-folder-open-line"></i> Open</button>
+    <button class="crud-btn" onclick="crudActionPreview()"><i class="ri-play-circle-line"></i> Play / View</button>
+    <button class="crud-btn" onclick="crudActionDownload()"><i class="ri-download-2-line"></i> Download</button>
+    <button class="crud-btn" onclick="crudActionCopy()"><i class="ri-file-copy-line"></i> Copy</button>
+    <button class="crud-btn" onclick="crudActionMove()"><i class="ri-scissors-cut-line"></i> Move</button>
+    <button class="crud-btn" onclick="crudActionDuplicate()"><i class="ri-file-copy-2-line"></i> Duplicate</button>
+    <button class="crud-btn" onclick="crudActionRename()"><i class="ri-edit-line"></i> Rename</button>
+    <button class="crud-btn danger full-span" onclick="crudActionDelete()"><i class="ri-delete-bin-line"></i> Trash</button>
+  </div>
+</div>
+
+<!-- MEDIA & FILE PREVIEW MODAL -->
+<div id="mediaPreviewModal" onclick="if(event.target===this)closeMediaPreview()" style="display:none;position:fixed;inset:0;z-index:1200;background:rgba(8,10,14,0.88);backdrop-filter:blur(6px);padding:14px;align-items:center;justify-content:center;">
+  <div style="width:100%;max-width:680px;background:var(--panel,#161b22);border:1px solid var(--border,#2d333b);border-radius:14px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 18px 48px rgba(0,0,0,0.55);">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border,#2d333b);">
+      <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+        <i id="mediaModalIcon" class="ri-play-circle-line" style="color:var(--accent);font-size:18px;"></i>
+        <span id="mediaModalTitle" style="font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Preview</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+        <button class="mini-btn" id="mediaModalDlBtn"><i class="ri-download-2-line"></i> Save</button>
+        <button class="icon-btn" onclick="closeMediaPreview()"><i class="ri-close-line"></i></button>
+      </div>
+    </div>
+    <div id="mediaModalBody" style="padding:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:140px;max-height:78vh;overflow:auto;"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>window.STUDIO_TOKEN = "__STUDIO_TOKEN__";</script>
+<script src="/assets/cm/codemirror.min.js"></script>
+<script src="/assets/cm/python.min.js"></script>
+<script src="/assets/cm/javascript.min.js"></script>
+<script src="/assets/cm/xml.min.js"></script>
+<script src="/assets/cm/css.min.js"></script>
+<script src="/assets/cm/htmlmixed.min.js"></script>
+<script src="/assets/cm/shell.min.js"></script>
+<script src="/assets/cm/markdown.min.js"></script>
+<script src="/assets/cm/closebrackets.min.js"></script>
+<script src="/assets/editor.js?v=1794569973"></script>
+<script src="/assets/crud.js?v=1794569973"></script>
+<script src="/assets/toolkit.js?v=1794569973"></script>
+<script src="/assets/main.js?v=1794569973"></script>
+</body>
+</html>
